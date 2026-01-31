@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package fileguardian.v1;
+
+option go_package = "github.com/carlosealves2/FileGuardian/internal/grpc/pb/fileguardian/v1;v1";
+
+// ConfigService manages application configuration and storage providers.
+service ConfigService {
+  // GetConfig returns the current application configuration.
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+
+  // ListProviders returns all available storage providers with their field
+  // schemas, allowing the frontend to dynamically build configuration forms.
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
+
+  // UpdateProviderConfig saves configuration for a storage provider.
+  // Non-sensitive fields are persisted in the database.
+  // Secret fields are stored in the OS keychain.
+  rpc UpdateProviderConfig(UpdateProviderConfigRequest) returns (UpdateProviderConfigResponse);
+}
+
+message GetConfigRequest {}
+
+message GetConfigResponse {
+  // Active storage provider name (e.g., "S3").
+  string active_provider = 1;
+  // Upload part size in bytes.
+  int64 upload_part_size = 2;
+  // Maximum number of concurrent uploads.
+  int32 upload_max_concurrent = 3;
+  // gRPC server port.
+  int32 grpc_port = 4;
+}
+
+message ListProvidersRequest {}
+
+message ListProvidersResponse {
+  // All registered storage providers with their configuration schemas.
+  repeated Provider providers = 1;
+}
+
+// Provider describes a storage provider and its configuration schema.
+message Provider {
+  // Unique provider identifier (e.g., "S3", "AZURE", "MEGA").
+  string name = 1;
+  // Human-readable display name (e.g., "Amazon S3", "Azure Blob Storage").
+  string display_name = 2;
+  // Whether this provider is currently active.
+  bool active = 3;
+  // Configuration fields required by this provider.
+  repeated ProviderField fields = 4;
+}
+
+// FieldType defines the data type of a provider configuration field.
+enum FieldType {
+  FIELD_TYPE_UNSPECIFIED = 0;
+  FIELD_TYPE_STRING = 1;
+  FIELD_TYPE_SECRET = 2;
+  FIELD_TYPE_NUMBER = 3;
+  FIELD_TYPE_BOOLEAN = 4;
+}
+
+message UpdateProviderConfigRequest {
+  // Provider identifier (e.g., "S3").
+  string provider = 1;
+  // Field values to save. Secret fields go to OS keychain, others to database.
+  repeated ProviderFieldValue fields = 2;
+  // Whether to set this provider as the active provider.
+  bool set_active = 3;
+}
+
+message UpdateProviderConfigResponse {}
+
+// ProviderFieldValue is a key-value pair sent by the client when saving config.
+message ProviderFieldValue {
+  string key = 1;
+  string value = 2;
+}
+
+// ProviderField describes a single configuration field for a storage provider.
+message ProviderField {
+  // Field identifier used as the environment variable suffix
+  // (e.g., "region" maps to AWS_REGION).
+  string key = 1;
+  // Human-readable label for the field (e.g., "Region").
+  string label = 2;
+  // Field data type.
+  FieldType type = 3;
+  // Whether this field is required.
+  bool required = 4;
+  // Current configured value. Empty for SECRET fields.
+  string value = 5;
+  // Placeholder or example value (e.g., "us-east-1").
+  string placeholder = 6;
+}
