@@ -1,0 +1,155 @@
+syntax = "proto3";
+
+package fileguardian.v1;
+
+option go_package = "github.com/carlosealves2/FileGuardian/internal/grpc/pb/fileguardian/v1;v1";
+
+import "google/protobuf/timestamp.proto";
+
+// UploadService manages file and folder uploads with pause, resume, and cancel
+// capabilities. All upload operations return a server-side stream of progress
+// updates.
+service UploadService {
+  // UploadFile initiates a single file upload and streams progress updates.
+  rpc UploadFile(UploadFileRequest) returns (stream UploadFileResponse);
+
+  // UploadFolder initiates a folder upload and streams progress updates for
+  // each file within the folder.
+  rpc UploadFolder(UploadFolderRequest) returns (stream UploadFolderResponse);
+
+  // PauseProcess pauses all active uploads within a process. The current part
+  // in progress will complete before pausing.
+  rpc PauseProcess(PauseProcessRequest) returns (PauseProcessResponse);
+
+  // ResumeProcess resumes a paused process and streams progress updates.
+  rpc ResumeProcess(ResumeProcessRequest) returns (stream ResumeProcessResponse);
+
+  // CancelProcess cancels a process and aborts all associated multipart uploads
+  // on the storage provider.
+  rpc CancelProcess(CancelProcessRequest) returns (CancelProcessResponse);
+
+  // ListProcesses returns a paginated list of processes using cursor-based
+  // pagination.
+  rpc ListProcesses(ListProcessesRequest) returns (ListProcessesResponse);
+
+  // GetProcess returns a process with all its associated uploads.
+  rpc GetProcess(GetProcessRequest) returns (GetProcessResponse);
+}
+
+// ProcessType indicates whether the process is a single file or folder upload.
+enum ProcessType {
+  PROCESS_TYPE_UNSPECIFIED = 0;
+  PROCESS_TYPE_FILE = 1;
+  PROCESS_TYPE_FOLDER = 2;
+}
+
+// Status represents the current state of a process or upload.
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STATUS_PENDING = 1;
+  STATUS_IN_PROGRESS = 2;
+  STATUS_PAUSED = 3;
+  STATUS_COMPLETED = 4;
+  STATUS_FAILED = 5;
+  STATUS_CANCELLED = 6;
+}
+
+message UploadFileRequest {
+  // Absolute path to the file on the local filesystem.
+  string file_path = 1;
+}
+
+// UploadFileResponse streams progress updates for a single file upload.
+message UploadFileResponse {
+  UploadProgress progress = 1;
+}
+
+message UploadFolderRequest {
+  // Absolute path to the folder on the local filesystem.
+  string folder_path = 1;
+}
+
+// UploadFolderResponse streams progress updates for a folder upload.
+message UploadFolderResponse {
+  UploadProgress progress = 1;
+}
+
+message PauseProcessRequest {
+  string process_id = 1;
+}
+
+message PauseProcessResponse {}
+
+message ResumeProcessRequest {
+  string process_id = 1;
+}
+
+// ResumeProcessResponse streams progress updates for a resumed process.
+message ResumeProcessResponse {
+  UploadProgress progress = 1;
+}
+
+message CancelProcessRequest {
+  string process_id = 1;
+}
+
+message CancelProcessResponse {}
+
+message ListProcessesRequest {
+  // Opaque cursor for pagination. Empty string for the first page.
+  string cursor = 1;
+  // Maximum number of processes to return. Defaults to 20 if not set.
+  int32 limit = 2;
+}
+
+message ListProcessesResponse {
+  repeated Process processes = 1;
+  // Cursor for the next page. Empty if no more results.
+  string next_cursor = 2;
+}
+
+message GetProcessRequest {
+  string process_id = 1;
+}
+
+message GetProcessResponse {
+  Process process = 1;
+  repeated Upload uploads = 2;
+}
+
+// UploadProgress contains real-time progress data for an upload operation.
+message UploadProgress {
+  string process_id = 1;
+  string upload_id = 2;
+  string file_path = 3;
+  int64 file_size = 4;
+  int64 bytes_uploaded = 5;
+  Status status = 6;
+  string error_message = 7;
+}
+
+// Process represents a logical grouping of one or more file uploads.
+message Process {
+  string id = 1;
+  ProcessType type = 2;
+  Status status = 3;
+  string provider = 4;
+  string source_path = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+// Upload represents a single file upload within a process.
+message Upload {
+  string id = 1;
+  string process_id = 2;
+  string file_path = 3;
+  string storage_key = 4;
+  int64 file_size = 5;
+  int64 bytes_uploaded = 6;
+  Status status = 7;
+  string error_message = 8;
+  string checksum = 9;
+  google.protobuf.Timestamp created_at = 10;
+  google.protobuf.Timestamp updated_at = 11;
+}
