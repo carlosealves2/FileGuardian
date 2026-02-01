@@ -10,6 +10,7 @@ import 'package:guardian_ui/features/dashboard/domain/usecases/pause_process.dar
 import 'package:guardian_ui/features/dashboard/domain/usecases/resume_process.dart';
 import 'package:guardian_ui/features/dashboard/domain/usecases/upload_file.dart';
 import 'package:guardian_ui/features/dashboard/domain/usecases/upload_folder.dart';
+import 'package:guardian_ui/features/dashboard/presentation/bloc/dashboard_stats_cubit.dart';
 import 'package:guardian_ui/features/dashboard/presentation/bloc/process_list_bloc.dart';
 import 'package:guardian_ui/features/dashboard/presentation/bloc/process_list_event.dart';
 import 'package:guardian_ui/features/dashboard/presentation/bloc/upload_bloc.dart';
@@ -58,6 +59,8 @@ void configureDependencies() {
   );
 
   // ── Dashboard ─────────────────────────────────────────
+  getIt.registerFactory(() => DashboardStatsCubit());
+
   getIt.registerLazySingleton<UploadRemoteDataSource>(
     () => UploadRemoteDataSource(
       client: getIt<GrpcChannel>().uploadServiceClient,

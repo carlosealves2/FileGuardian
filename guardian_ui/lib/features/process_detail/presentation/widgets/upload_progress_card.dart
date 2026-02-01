@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:guardian_ui/core/format/byte_formatter.dart';
 import 'package:guardian_ui/core/theme/status_colors.dart';
 import 'package:guardian_ui/features/dashboard/domain/entities/process_entity.dart';
 import 'package:guardian_ui/features/dashboard/presentation/widgets/status_badge.dart';
@@ -58,7 +59,7 @@ class UploadProgressCard extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  '${_formatBytes(upload.bytesUploaded)} / ${_formatBytes(upload.fileSize)}',
+                  '${formatBytes(upload.bytesUploaded)} / ${formatBytes(upload.fileSize)}',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),
@@ -100,14 +101,4 @@ class UploadProgressCard extends StatelessWidget {
     };
   }
 
-  String _formatBytes(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) {
-      return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    }
-    if (bytes < 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    }
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
-  }
 }
