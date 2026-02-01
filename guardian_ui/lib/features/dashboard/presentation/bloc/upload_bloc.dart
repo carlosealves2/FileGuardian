@@ -93,7 +93,11 @@ class UploadBloc extends Bloc<UploadEvent, UploadState> {
     }
 
     if (_terminalStatuses.contains(progress.status)) {
-      // Remove terminal entries from active tracking
+      // Emit the terminal status so listeners see it before removal
+      _progressMap[progress.uploadId] = progress;
+      _emitCurrentState(emit);
+
+      // Then remove from active tracking
       _progressMap.remove(progress.uploadId);
       _notifyProcessChanged();
     } else {

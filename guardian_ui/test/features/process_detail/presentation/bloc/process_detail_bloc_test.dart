@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fpdart/fpdart.dart';
@@ -5,6 +7,7 @@ import 'package:mocktail/mocktail.dart';
 
 import 'package:guardian_ui/core/error/failures.dart';
 import 'package:guardian_ui/features/dashboard/domain/entities/process_entity.dart';
+import 'package:guardian_ui/features/dashboard/domain/entities/upload_progress_entity.dart';
 import 'package:guardian_ui/features/dashboard/domain/usecases/cancel_process.dart';
 import 'package:guardian_ui/features/dashboard/domain/usecases/pause_process.dart';
 import 'package:guardian_ui/features/dashboard/domain/usecases/resume_process.dart';
@@ -131,6 +134,137 @@ void main() {
       expect: () => [
         const ProcessDetailLoading(),
         ProcessDetailLoaded(process: process, uploads: uploads),
+      ],
+    );
+  });
+
+  group('UploadBloc stream subscription', () {
+    blocTest<ProcessDetailBloc, ProcessDetailState>(
+      'reloads process detail when UploadIdle is emitted',
+      setUp: () {
+        final completedProcess = ProcessEntity(
+          id: 'proc-1',
+          type: ProcessType.file,
+          status: ProcessStatus.completed,
+          provider: 'S3',
+          sourcePath: '/tmp/test.txt',
+          createdAt: DateTime(2025, 1, 1),
+          updatedAt: DateTime(2025, 1, 1),
+        );
+        final completedUploads = [
+          UploadEntity(
+            id: 'up-1',
+            processId: 'proc-1',
+            filePath: '/tmp/test.txt',
+            storageKey: 'test.txt',
+            fileSize: 1024,
+            bytesUploaded: 1024,
+            status: ProcessStatus.completed,
+            createdAt: DateTime(2025, 1, 1),
+            updatedAt: DateTime(2025, 1, 1),
+          ),
+        ];
+
+        whenListen(
+          mockUploadBloc,
+          Stream<UploadState>.fromIterable([const UploadIdle()]),
+          initialState: const UploadIdle(),
+        );
+
+        when(() => mockGetProcessDetail(processId: 'proc-1')).thenAnswer(
+          (_) async => Right(ProcessDetailResult(
+            process: completedProcess,
+            uploads: completedUploads,
+          )),
+        );
+      },
+      build: buildBloc,
+      seed: () => ProcessDetailLoaded(process: process, uploads: uploads),
+      wait: const Duration(milliseconds: 100),
+      expect: () => [
+        const ProcessDetailLoading(),
+        isA<ProcessDetailLoaded>().having(
+          (s) => s.process.status,
+          'process status',
+          ProcessStatus.completed,
+        ),
+      ],
+      verify: (_) {
+        verify(() => mockGetProcessDetail(processId: 'proc-1')).called(1);
+      },
+    );
+
+    blocTest<ProcessDetailBloc, ProcessDetailState>(
+      'updates upload progress when UploadInProgress with relevant uploads',
+      setUp: () {
+        whenListen(
+          mockUploadBloc,
+          Stream<UploadState>.fromIterable([
+            const UploadInProgress(
+              progressByUploadId: {
+                'up-1': UploadProgressEntity(
+                  processId: 'proc-1',
+                  uploadId: 'up-1',
+                  filePath: '/tmp/test.txt',
+                  fileSize: 1024,
+                  bytesUploaded: 768,
+                  status: ProcessStatus.inProgress,
+                ),
+              },
+            ),
+          ]),
+          initialState: const UploadIdle(),
+        );
+      },
+      build: buildBloc,
+      seed: () => ProcessDetailLoaded(process: process, uploads: uploads),
+      wait: const Duration(milliseconds: 100),
+      expect: () => [
+        isA<ProcessDetailLoaded>().having(
+          (s) => s.uploads.first.bytesUploaded,
+          'bytesUploaded',
+          768,
+        ),
+      ],
+    );
+
+    blocTest<ProcessDetailBloc, ProcessDetailState>(
+      'updates upload status to completed when terminal status received',
+      setUp: () {
+        whenListen(
+          mockUploadBloc,
+          Stream<UploadState>.fromIterable([
+            const UploadInProgress(
+              progressByUploadId: {
+                'up-1': UploadProgressEntity(
+                  processId: 'proc-1',
+                  uploadId: 'up-1',
+                  filePath: '/tmp/test.txt',
+                  fileSize: 1024,
+                  bytesUploaded: 1024,
+                  status: ProcessStatus.completed,
+                ),
+              },
+            ),
+          ]),
+          initialState: const UploadIdle(),
+        );
+      },
+      build: buildBloc,
+      seed: () => ProcessDetailLoaded(process: process, uploads: uploads),
+      wait: const Duration(milliseconds: 100),
+      expect: () => [
+        isA<ProcessDetailLoaded>()
+            .having(
+              (s) => s.uploads.first.status,
+              'upload status',
+              ProcessStatus.completed,
+            )
+            .having(
+              (s) => s.uploads.first.bytesUploaded,
+              'bytesUploaded',
+              1024,
+            ),
       ],
     );
   });

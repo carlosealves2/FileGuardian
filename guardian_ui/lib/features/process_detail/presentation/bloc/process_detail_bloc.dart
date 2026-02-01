@@ -47,6 +47,9 @@ class ProcessDetailBloc
         if (relevant.isNotEmpty) {
           add(ProcessDetailUploadProgressReceived(relevant));
         }
+      } else if (uploadState is UploadIdle) {
+        // All uploads finished — reload from backend for fresh state
+        add(const ProcessDetailLoadRequested());
       }
     });
   }
