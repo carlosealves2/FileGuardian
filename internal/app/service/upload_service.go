@@ -28,9 +28,15 @@ type UploadService struct {
 	logger          *slog.Logger
 	partSize        int64
 	maxWorkers      int32
+	partsParallel   int32
 
 	mu          sync.Mutex
 	cancelFuncs map[string]context.CancelFunc
+}
+
+type partResult struct {
+	part valueobject.CompletedPart
+	err  error
 }
 
 func NewUploadService(
@@ -40,6 +46,7 @@ func NewUploadService(
 	logger *slog.Logger,
 	partSize int64,
 	maxWorkers int32,
+	partsParallel int32,
 ) *UploadService {
 	return &UploadService{
 		processRepo:     processRepo,
@@ -48,6 +55,7 @@ func NewUploadService(
 		logger:          logger,
 		partSize:        partSize,
 		maxWorkers:      maxWorkers,
+		partsParallel:   partsParallel,
 		cancelFuncs:     make(map[string]context.CancelFunc),
 	}
 }
@@ -422,60 +430,13 @@ func (s *UploadService) executeUpload(ctx context.Context, storage driven.FileSt
 	}
 	defer f.Close()
 
-	totalParts := (upload.FileSize + s.partSize - 1) / s.partSize
-	startPart := upload.NextPartNumber()
-
-	for partNum := startPart; int64(partNum) <= totalParts; partNum++ {
-		select {
-		case <-ctx.Done():
-			// Paused or cancelled - save state
-			if err := upload.TransitionTo(valueobject.StatusPaused); err != nil {
-				return fmt.Errorf("transitioning upload to paused: %w", err)
-			}
-			if err := s.uploadRepo.Update(ctx, *upload); err != nil {
-				return fmt.Errorf("updating upload: %w", err)
-			}
-			s.sendProgress(progressCh, *upload)
-			return ctx.Err()
-		default:
-		}
-
-		offset := int64(partNum-1) * s.partSize
-		size := s.partSize
-		if offset+size > upload.FileSize {
-			size = upload.FileSize - offset
-		}
-
-		partData := make([]byte, size)
-		if _, err := f.ReadAt(partData, offset); err != nil && err != io.EOF {
-			s.failUpload(ctx, upload, err)
-			s.sendProgress(progressCh, *upload)
-			return err
-		}
-
-		partHash := sha256.Sum256(partData)
-		partSHA256 := hex.EncodeToString(partHash[:])
-
-		etag, err := storage.UploadPart(ctx, upload.StorageKey, upload.MultipartUploadID, partNum, bytes.NewReader(partData), partSHA256)
-		if err != nil {
-			s.failUpload(ctx, upload, err)
-			s.sendProgress(progressCh, *upload)
-			return err
-		}
-
-		upload.AddCompletedPart(valueobject.CompletedPart{
-			PartNumber: partNum,
-			ETag:       etag,
-			Size:       size,
-		})
-		if err := s.uploadRepo.Update(ctx, *upload); err != nil {
-			return fmt.Errorf("updating upload: %w", err)
-		}
-		s.sendProgress(progressCh, *upload)
+	totalParts := int32((upload.FileSize + s.partSize - 1) / s.partSize) // #nosec G115 -- max 10,000 parts (S3 limit)
+	if err := s.uploadParts(ctx, storage, upload, f, totalParts, progressCh); err != nil {
+		return err
 	}
 
 	// Complete multipart
-	if err := storage.CompleteMultipartUpload(ctx, upload.StorageKey, upload.MultipartUploadID, upload.CompletedParts); err != nil {
+	if err := storage.CompleteMultipartUpload(ctx, upload.StorageKey, upload.MultipartUploadID, upload.SortedCompletedParts()); err != nil {
 		s.failUpload(ctx, upload, err)
 		s.sendProgress(progressCh, *upload)
 		return err
@@ -498,6 +459,112 @@ func (s *UploadService) executeUpload(ctx context.Context, storage driven.FileSt
 		return fmt.Errorf("updating upload: %w", err)
 	}
 	s.sendProgress(progressCh, *upload)
+
+	return nil
+}
+
+func (s *UploadService) uploadParts(ctx context.Context, storage driven.FileStorage, upload *entity.Upload, f *os.File, totalParts int32, progressCh chan<- driving.UploadProgress) error {
+	pendingParts := upload.PendingPartNumbers(totalParts)
+	if len(pendingParts) == 0 {
+		return nil
+	}
+
+	partCtx, partCancel := context.WithCancel(ctx)
+	defer partCancel()
+
+	resultCh := make(chan partResult, len(pendingParts))
+	sem := make(chan struct{}, s.partsParallel)
+
+	// Launch worker goroutines
+	var wg sync.WaitGroup
+	for _, partNum := range pendingParts {
+		wg.Add(1)
+		go func(pn int32) {
+			defer wg.Done()
+
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-partCtx.Done():
+				resultCh <- partResult{err: partCtx.Err()}
+				return
+			}
+
+			offset := int64(pn-1) * s.partSize
+			size := s.partSize
+			if offset+size > upload.FileSize {
+				size = upload.FileSize - offset
+			}
+
+			partData := make([]byte, size)
+			if _, err := f.ReadAt(partData, offset); err != nil && err != io.EOF {
+				resultCh <- partResult{err: fmt.Errorf("reading part %d: %w", pn, err)}
+				return
+			}
+
+			partHash := sha256.Sum256(partData)
+			partSHA256 := hex.EncodeToString(partHash[:])
+
+			etag, err := storage.UploadPart(partCtx, upload.StorageKey, upload.MultipartUploadID, pn, bytes.NewReader(partData), partSHA256)
+			if err != nil {
+				resultCh <- partResult{err: fmt.Errorf("uploading part %d: %w", pn, err)}
+				return
+			}
+
+			resultCh <- partResult{
+				part: valueobject.CompletedPart{
+					PartNumber: pn,
+					ETag:       etag,
+					Size:       size,
+				},
+			}
+		}(partNum)
+	}
+
+	// Close resultCh once all workers finish
+	go func() {
+		wg.Wait()
+		close(resultCh)
+	}()
+
+	// Single collector: only this goroutine touches upload state
+	var firstErr error
+	for result := range resultCh {
+		if result.err != nil {
+			if firstErr == nil {
+				firstErr = result.err
+				partCancel()
+			}
+			continue
+		}
+
+		upload.AddCompletedPart(result.part)
+		if err := s.uploadRepo.Update(ctx, *upload); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("updating upload: %w", err)
+				partCancel()
+			}
+			continue
+		}
+		s.sendProgress(progressCh, *upload)
+	}
+
+	if firstErr != nil {
+		if ctx.Err() != nil {
+			// Parent context cancelled (pause/cancel)
+			if err := upload.TransitionTo(valueobject.StatusPaused); err != nil {
+				return fmt.Errorf("transitioning upload to paused: %w", err)
+			}
+			if err := s.uploadRepo.Update(ctx, *upload); err != nil {
+				return fmt.Errorf("updating paused upload: %w", err)
+			}
+			s.sendProgress(progressCh, *upload)
+			return ctx.Err()
+		}
+		s.failUpload(ctx, upload, firstErr)
+		s.sendProgress(progressCh, *upload)
+		return firstErr
+	}
 
 	return nil
 }

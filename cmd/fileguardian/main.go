@@ -60,7 +60,7 @@ func main() {
 	storageResolver := resolver.NewStorageResolver(configRepo, storageFactory)
 
 	// Services
-	uploadSvc := service.NewUploadService(processRepo, uploadRepo, storageResolver, logger, cfg.UploadPartSize, cfg.UploadMaxConcurrent)
+	uploadSvc := service.NewUploadService(processRepo, uploadRepo, storageResolver, logger, cfg.UploadPartSize, cfg.UploadMaxConcurrent, cfg.UploadPartsParallel)
 	configSvc := service.NewConfigService(cfg, configRepo, secretStore)
 
 	// gRPC server

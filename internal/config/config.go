@@ -7,11 +7,12 @@ import (
 )
 
 type Config struct {
-	GRPCPort            int32
-	UploadPartSize      int64
-	UploadMaxConcurrent int32
-	DBPath              string
-	LockPath            string
+	GRPCPort             int32
+	UploadPartSize       int64
+	UploadMaxConcurrent  int32
+	UploadPartsParallel  int32
+	DBPath               string
+	LockPath             string
 }
 
 // FieldType defines the data type of a provider configuration field.
@@ -66,6 +67,7 @@ func Load() Config {
 		GRPCPort:            getEnv[int32]("GRPC_PORT", 50051),
 		UploadPartSize:      getEnv[int64]("UPLOAD_PART_SIZE", 5*1024*1024),
 		UploadMaxConcurrent: getEnv[int32]("UPLOAD_MAX_CONCURRENT", 5),
+		UploadPartsParallel: getEnv[int32]("UPLOAD_PARTS_PARALLEL", 3),
 		DBPath:              getEnv("DB_PATH", filepath.Join(defaultDir, "fileguardian.db")),
 		LockPath:            getEnv("LOCK_PATH", filepath.Join(defaultDir, "lock")),
 	}

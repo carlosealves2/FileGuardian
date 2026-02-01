@@ -1,6 +1,7 @@
 package entity
 
 import (
+	"sort"
 	"time"
 
 	"github.com/carlosealves2/FileGuardian/internal/domain/valueobject"
@@ -67,6 +68,30 @@ func (u *Upload) SetMultipartUploadID(uploadID string) {
 func (u *Upload) SetError(msg string) {
 	u.ErrorMessage = msg
 	u.UpdatedAt = time.Now().UTC()
+}
+
+func (u *Upload) PendingPartNumbers(totalParts int32) []int32 {
+	completed := make(map[int32]struct{}, len(u.CompletedParts))
+	for _, p := range u.CompletedParts {
+		completed[p.PartNumber] = struct{}{}
+	}
+
+	var pending []int32
+	for i := int32(1); i <= totalParts; i++ {
+		if _, ok := completed[i]; !ok {
+			pending = append(pending, i)
+		}
+	}
+	return pending
+}
+
+func (u *Upload) SortedCompletedParts() []valueobject.CompletedPart {
+	sorted := make([]valueobject.CompletedPart, len(u.CompletedParts))
+	copy(sorted, u.CompletedParts)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].PartNumber < sorted[j].PartNumber
+	})
+	return sorted
 }
 
 func (u *Upload) ClearMultipartState() {
