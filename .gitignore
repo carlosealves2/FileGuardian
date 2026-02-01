@@ -46,3 +46,15 @@ internal/grpc/pb/
 
 # Lock file
 *.lock
+
+# Flutter - generated code (regenerated via make ui-gen)
+*.freezed.dart
+*.g.dart
+*.inject.summary
+*.inject.dart
+*.config.dart
+
+# Flutter - build artifacts
+guardian_ui/build/
+guardian_ui/.dart_tool/
+guardian_ui/.packages
