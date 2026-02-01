@@ -69,6 +69,57 @@ func TestUpload_ClearMultipartState(t *testing.T) {
 	}
 }
 
+func TestUpload_PendingPartNumbers(t *testing.T) {
+	u := entity.NewUpload("u1", "p1", "/tmp/file.txt", "uploads/file.txt", 20*1024*1024, "abc123")
+	u.AddCompletedPart(valueobject.CompletedPart{PartNumber: 1, ETag: "e1", Size: 5 * 1024 * 1024})
+	u.AddCompletedPart(valueobject.CompletedPart{PartNumber: 3, ETag: "e3", Size: 5 * 1024 * 1024})
+
+	pending := u.PendingPartNumbers(4)
+
+	if len(pending) != 2 {
+		t.Fatalf("expected 2 pending parts, got %d", len(pending))
+	}
+	if pending[0] != 2 || pending[1] != 4 {
+		t.Errorf("expected pending [2, 4], got %v", pending)
+	}
+}
+
+func TestUpload_PendingPartNumbers_NoneCompleted(t *testing.T) {
+	u := entity.NewUpload("u1", "p1", "/tmp/file.txt", "uploads/file.txt", 15*1024*1024, "abc123")
+
+	pending := u.PendingPartNumbers(3)
+
+	if len(pending) != 3 {
+		t.Fatalf("expected 3 pending parts, got %d", len(pending))
+	}
+	if pending[0] != 1 || pending[1] != 2 || pending[2] != 3 {
+		t.Errorf("expected pending [1, 2, 3], got %v", pending)
+	}
+}
+
+func TestUpload_SortedCompletedParts(t *testing.T) {
+	u := entity.NewUpload("u1", "p1", "/tmp/file.txt", "uploads/file.txt", 15*1024*1024, "abc123")
+	u.AddCompletedPart(valueobject.CompletedPart{PartNumber: 3, ETag: "e3", Size: 5 * 1024 * 1024})
+	u.AddCompletedPart(valueobject.CompletedPart{PartNumber: 1, ETag: "e1", Size: 5 * 1024 * 1024})
+	u.AddCompletedPart(valueobject.CompletedPart{PartNumber: 2, ETag: "e2", Size: 5 * 1024 * 1024})
+
+	sorted := u.SortedCompletedParts()
+
+	if len(sorted) != 3 {
+		t.Fatalf("expected 3 parts, got %d", len(sorted))
+	}
+	for i, expected := range []int32{1, 2, 3} {
+		if sorted[i].PartNumber != expected {
+			t.Errorf("expected part %d at index %d, got %d", expected, i, sorted[i].PartNumber)
+		}
+	}
+
+	// Verify original order is unchanged
+	if u.CompletedParts[0].PartNumber != 3 {
+		t.Error("SortedCompletedParts mutated original slice")
+	}
+}
+
 func TestUpload_StateTransitions(t *testing.T) {
 	u := entity.NewUpload("u1", "p1", "/tmp/file.txt", "uploads/file.txt", 1024, "abc123")
 
